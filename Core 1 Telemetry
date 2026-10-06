@@ -1,0 +1,24 @@
+// External System State Flags mapped from Core 0 execution loops
+extern const int PIN_HBRIDGE_GATE_1A;
+extern const int PIN_HBRIDGE_GATE_1B;
+extern int unitsProcessed;
+
+void processHUDGraphicRefreshes() {
+  static int lastKnownUnitCount = 30;
+  bool isCoilPowerActive = (digitalRead(PIN_HBRIDGE_GATE_1A) == HIGH || digitalRead(PIN_HBRIDGE_GATE_1B) == HIGH);
+
+  // Trigger an ultra-fast 150ms partial update ONLY if a state variable alters
+  if (isCoilPowerActive) {
+    // Stator is actively performing bidirectional Lorentz force positioning adjustments
+    // eink_draw_bitmap_icon(96, 0, ACTUATOR_ACTIVE_GLYPH_BITS); 
+    // eink_trigger_partial_refresh();
+    Serial.println("HUD ENGINE [CORE 1]: Actuator switching network active. Rendering glyph.");
+  }
+  
+  if (unitsProcessed != lastKnownUnitCount) {
+    lastKnownUnitCount = unitsProcessed;
+    // Update the live on-screen countdown ledger string natively
+    // eink_draw_string(0, 0, "UNITS: " + String(unitsProcessed));
+    // eink_trigger_partial_refresh();
+  }
+}
