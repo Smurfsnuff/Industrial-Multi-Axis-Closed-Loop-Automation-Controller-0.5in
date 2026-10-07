@@ -1,0 +1,59 @@
+#include <Arduino.h>
+
+// Master Pin Map Constants
+const int PIN_ACTUATOR_GATE_PULL = 4;   // 12V Miniature Solenoid Pin (Primary Mechanical Interlock)
+const int PIN_HBRIDGE_GATE_1A    = 5;   // 20 AWG Induction Coil Stage A (Lead 1)
+const int PIN_HBRIDGE_GATE_1B    = 18;  // 20 AWG Induction Coil Stage A (Lead 2)
+const int PIN_INTERLOCK_ENGAGED  = 17;  // High when user interface sensor is compressed
+
+// ATF Compliance Registers (The Monostable Legal Gate)
+volatile bool isTriggerFullyReset      = true;  // Mandates trigger return before next execution
+volatile bool triggerEdgeStateDetected = false;
+
+extern volatile float sharedCoreStressPSI;
+extern volatile bool isChassisSafeToRelease;
+extern volatile int unitsProcessed;
+extern unsigned long lastCycleCompletionMs;
+extern unsigned long cadenceDelayWindowMs;
+
+void executeATFCompliantActuatorLoop() {
+  // Probes the digital status of the user-interface trigger edge
+  bool isTriggerCurrentlyPressed = (digitalRead(PIN_INTERLOCK_ENGAGED) == HIGH);
+
+  // 1. THE MONOSTABLE RESET GATE: Clear the lock ONLY when the user fully releases the trigger
+  if (!isTriggerCurrentlyPressed) {
+    isTriggerFullyReset = true;  // Legal gate cleared for the next independent cycle
+    triggerEdgeStateDetected = false;
+  }
+
+  // 2. THE EDGE-DETECTION TRIGGER FILTER: Detect the exact microsecond transition
+  if (isTriggerCurrentlyPressed && isTriggerFullyReset && !triggerEdgeStateDetected) {
+    triggerEdgeStateDetected = true; // Lock down the edge immediately
+    
+    // 🛡️ THE DETERMINISTIC ANTI-AUTOMATION SHIELD
+    // Ensure the system only processes ONE unit per single function of the trigger interface
+    if (sharedCoreStressPSI < 5.0 && isChassisSafeToRelease && unitsProcessed > 0) {
+      if (millis() - lastCycleCompletionMs >= cadenceDelayWindowMs) {
+        
+        // Retract primary mechanical lock pin for 6ms to clear linear core vector path
+        digitalWrite(PIN_ACTUATOR_GATE_PULL, HIGH);
+        
+        // Clockwise current flow: Drives precision electromagnetic core extraction
+        digitalWrite(PIN_HBRIDGE_GATE_1A, HIGH);
+        digitalWrite(PIN_HBRIDGE_GATE_1B, LOW);
+        delayMicroseconds(6000); 
+        
+        digitalWrite(PIN_ACTUATOR_GATE_PULL, LOW);
+        digitalWrite(PIN_HBRIDGE_GATE_1A, LOW); // De-energize coil
+
+        lastCycleCompletionMs = millis();
+        if (unitsProcessed > 0) unitsProcessed--;
+
+        // HARD STATE LOCK: Enforce the legal lockout flag instantly
+        isTriggerFullyReset = false; 
+        
+        Serial.println("COMPLIANCE CORE [CORE 0]: Single mechanical cycle completed. State lock engaged.");
+      }
+    }
+  }
+}
